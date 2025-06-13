@@ -1,0 +1,54 @@
+# garbage
+.idea/
+*.DS_STORE
+__pycache__/
+*.vscode
+*.pytest_cache
+
+# data
+*.csv
+*.parquet
+*.json
+*.xlsx
+*.xls
+data
+*.env
+# *.png
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# cache and checkpoint files
+*cache_*.lock
+*.arrow
+*.pt
+*.wandb
+checkpoints/EXP
+__pycache__/
+debug.log
+debug-core.log
+config-*.yaml
+/wandb/
+utils*.pyc
+cache/
+/source/__pycache__/
