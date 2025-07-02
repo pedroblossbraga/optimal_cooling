@@ -17,7 +17,7 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
 
         % vector of residuals
-        R = -[Rz; RU(:); RV(:); Rlambda; Rmu];
+        R = -[Rz; RU(:); RV(:); Rlambda; Rmu(:)];
         
         % check convergence
         norm_R = norm(R);
@@ -26,6 +26,21 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
             fprintf('Newton converged at iter %d with ||R|| = %.2e\n', iter, norm_R);
             break;
         end
+        
+        constraint = sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r));
+        fprintf("||U^T K U|| sum: %.4f\n", constraint);
+        
+        cost = z' * K * z + sum(arrayfun(@(i) V(:,i)' * K * V(:,i), 1:r));
+        fprintf("Iter %d, cost: %.4e\n", k, cost);
+
+
+        % %% check temperature field instead of all residuals
+        % norm_Rz = norm(Rz);
+        % fprintf("---- norm(Rz): %s\n", norm_Rz);
+        % if norm_Rz < tol
+        %     fprintf('Newton converged at iter %d with ||Rz|| = %.2e\n', k, norm_Rz);
+        %     break;
+        % end
         
         % build jacobian matrix blocks A and Bmat (different from other B)
         % J = | A   B |
@@ -43,38 +58,53 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         delta_lambda = s2(1);
         delta_mu = s2(2:end);
         
-        % step size search
-        alpha = 0.01; % initial step
-        z_new = z + alpha * delta_z;
-            U_new = U + alpha * delta_U;
-            V_new = V + alpha * delta_V;
-            lambda_new = lambda + alpha * delta_lambda;
-            mu_new = mu + alpha * delta_mu;
-
-
-        % STEP_TOL = 1e-4;
-        % for ls_iter = 1:10
-        % 
-        %     % Update variables
-        %     z_new = z + alpha * delta_z;
+        % % step size search
+        % alpha = 0.01; % initial step
+        % % alpha = 1;
+        % z_new = z + alpha * delta_z;
         %     U_new = U + alpha * delta_U;
         %     V_new = V + alpha * delta_V;
         %     lambda_new = lambda + alpha * delta_lambda;
         %     mu_new = mu + alpha * delta_mu;
-        % 
-        %     % update residuals
-        %     [Rz_new, RU_new, RV_new, Rlambda_new, Rmu_new] = compute_residuals(K, B, f, Pe, U_new, V_new, z_new, lambda_new, mu_new);
-        % 
-        %     R_new = [Rz_new; RU_new(:); RV_new(:); Rlambda_new; Rmu_new];
-        % 
-        %     if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
-        %         break;
-        %     end
-        %     alpha = alpha / 2;
-        % end
 
-        % Update variables
-        U=U_new; V=V_new; z=z_new; lambda=lambda_new; mu=mu_new;
+        %------------------------------------------------------------------
+        %---------  Step size search --------------------------------------
+        % Initial step
+        % alpha = 0.01;
+        alpha=1;
+        STEP_TOL = 1e-4;    % sigma
+        BETA = 0.5;         % shrink factor
+        max_ls_iter = 20;
+        
+        for ls_iter = 1:max_ls_iter
+            % Trial update
+            z_trial = z + alpha * delta_z;
+            U_trial = U + alpha * delta_U;
+            V_trial = V + alpha * delta_V;
+            lambda_trial = lambda + alpha * delta_lambda;
+            mu_trial = mu + alpha * delta_mu;
+        
+            % Compute residual at trial point
+            [Rz_new, RU_new, RV_new, Rlambda_new, Rmu_new] = ...
+                compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
+            R_new = [Rz_new; RU_new(:); RV_new(:); Rlambda_new; Rmu_new];
+        
+            % Check Armijo condition
+            if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
+                break;  % sufficient decrease
+            end
+        
+            alpha = BETA * alpha;  % reduce step
+        end
+        
+        % Accept update
+        z = z + alpha * delta_z;
+        U = U + alpha * delta_U;
+        V = V + alpha * delta_V;
+        lambda = lambda + alpha * delta_lambda;
+        mu = mu + alpha * delta_mu;
+        %------------------------------------------------------------------
+
     end
 end
 
@@ -96,8 +126,10 @@ function [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, la
         for j = 1:n
             BJ = B{j};
 
-            RU(:,i) = RU(:,i) - Pe * dot(mu, BJ  * V(:,i));
-            RV(:,i) = RV(:,i) - Pe * dot(mu, BJ' * U(:,i));
+            % RU(:,i) = RU(:,i) - Pe * dot(mu, BJ  * V(:,i));
+            % RV(:,i) = RV(:,i) - Pe * dot(mu, BJ' * U(:,i));
+            RU(:,i) = RU(:,i) - Pe * mu(j) * BJ * V(:,i);
+            RV(:,i) = RV(:,i) - Pe * mu(j) * BJ' * U(:,i);
         end
     end
 
@@ -106,13 +138,21 @@ function [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, la
         Rlambda = Rlambda + U(:,i)' * K * U(:,i);
     end
     
-    Rmu = K*z - f;
-    for i = 1:m
-        for j = 1:n
-            BJ = B{j};
-            Rmu = Rmu - Pe * U(:,i)' * BJ * V(:,i);
+    % Rmu = K*z - f;
+    % for i = 1:m
+    %     for j = 1:n
+    %         BJ = B{j};
+    %         Rmu = Rmu - Pe * U(:,i)' * BJ * V(:,i);
+    %     end
+    % end
+    %$ subtracting scalar f from vector Rmu
+    source = zeros(n,1);
+    for j = 1:n
+        for i = 1:m
+            source(j) = source(j) + U(:,i)' * B{j} * V(:,i);
         end
     end
+    Rmu = K*z - f - Pe * source;
 end
 
 
@@ -187,8 +227,14 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
             gamma_i_tr(:,j) = - Pe * B{j}' * U(:,i);
         end
 
-        Bmat(Ui_idx, 2:end) = beta_i_tr;
-        Bmat(Vi_idx, 2:end) = gamma_i_tr;
+        % Bmat(Ui_idx, 2:end) = beta_i_tr;
+        % Bmat(Vi_idx, 2:end) = gamma_i_tr;
+        %% this overwrites values, as beta_i_tr is n × n, and the block
+        %% is of shape n x n, repeated per i
+        %% instead, accumulate the contributions accross i:
+        Bmat(Ui_idx, 2:end) = Bmat(Ui_idx, 2:end) + beta_i_tr;
+        Bmat(Vi_idx, 2:end) = Bmat(Vi_idx, 2:end) + gamma_i_tr;
+
     end
 end
 
@@ -224,9 +270,9 @@ function [s1, s2] = solve_newton_system(A, Bmat, rhs)
     % t1 = B^T A^{-1} B = (L^{-1} B)^T D^{-1} (L^{-1} B)
     % Linv_B = inv(L) * Bmat;
     % t1 = Linv_B' * inv(D) * Linv_B;
-    Y = L \ Bmat;         % solve L * Y = Bmat
-    Z = D \ Y;            % solve D * Z = Y
-    t1 = Y' * Z;
+    Y = L \ Bmat;         % solve L * Y = Bmat , Y = (L^{-1} B)
+    Z = D \ Y;            % solve D * Z = Y , Z = D^{-1} (L^{-1} B)
+    t1 = Y' * Z; % t1 = (Bˆ T A^{-1} B) = (L^{-1} B)^T D^{-1} (L^{-1} B)
 
     % assert(all(size(Bmat' * (A \ R1)) == size(R2)), "Incompatible sizes: Bᵗ A⁻¹ R1 and R2");
     % solve for s2

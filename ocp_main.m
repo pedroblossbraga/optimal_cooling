@@ -66,20 +66,3 @@ if N <= 25
         warning('Could not solve SDP. Please install YALMIP and MOSEK!')
     end
 end
-
-% max_iter = 100;
-% [U, V, z] = newton_oc(K, B, f, Pe, M, tol, max_iter);
-% 
-% % plot z result on the mesh
-% figure();
-% trisurf(elements(:,1:3),nodes(:,1),nodes(:,2),z,'FaceColor','interp');
-% axis equal; view([0 90]);
-% title('Solution z from Newton method');
-% 
-% % visualize heat source
-% X = zeros(n);
-% for i = 1:size(U,2)
-%     X = X + [U(:,i); V(:,i)] * [U(:,i); V(:,i)]';
-% end
-
-
