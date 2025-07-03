@@ -3,27 +3,25 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
     % r (low rank!!)
     
     % --- Initialization ---
-    U = randn(M_nodes, r); V = randn(M_nodes, r);
+    U = eye(M_nodes, r);
+    V = eye(M_nodes, r);
     z = zeros(M_nodes, 1);
     n = size(K,1);
 
     % initial lagrange multipliers
     lambda = 1; 
-    mu = randn(n,1);
+    mu = zeros(n,1);
 
     for k = 1:max_iter
 
         % compute residuals
-        [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
-
-        % vector of residuals
-        R = -[Rz; RU(:); RV(:); Rlambda; Rmu(:)];
+        R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
         
         % check convergence
         norm_R = norm(R);
         fprintf("---- norm(R): %s\n", norm_R);
         if norm_R < tol
-            fprintf('Newton converged at iter %d with ||R|| = %.2e\n', iter, norm_R);
+            fprintf('Newton converged at iter %d with ||R|| = %.2e\n', k, norm_R);
             break;
         end
         
@@ -53,8 +51,10 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         
         % extract all updates
         delta_z = s1(1:n);
-        delta_U = reshape(s1(n+1:n+r*n), n, r);
-        delta_V = reshape(s1(n+r*n+1:end), n, r);
+        idx = n + (1 : 2*n*r);
+        delta_UV = reshape( s1(idx), 2*n, r );
+        delta_U = delta_UV(1:n,:);
+        delta_V = delta_UV(n+1:2*n,:);
         delta_lambda = s2(1);
         delta_mu = s2(2:end);
         
@@ -69,12 +69,11 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
 
         %------------------------------------------------------------------
         %---------  Step size search --------------------------------------
-        % Initial step
-        % alpha = 0.01;
-        alpha=1;
+        % alpha = 0.01;     % Initial step
+        alpha=1;            % Initial step
         STEP_TOL = 1e-4;    % sigma
         BETA = 0.5;         % shrink factor
-        max_ls_iter = 20;
+        max_ls_iter = 200;
         
         for ls_iter = 1:max_ls_iter
             % Trial update
@@ -85,9 +84,7 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
             mu_trial = mu + alpha * delta_mu;
         
             % Compute residual at trial point
-            [Rz_new, RU_new, RV_new, Rlambda_new, Rmu_new] = ...
-                compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
-            R_new = [Rz_new; RU_new(:); RV_new(:); Rlambda_new; Rmu_new];
+            R_new = compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
         
             % Check Armijo condition
             if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
@@ -108,14 +105,14 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
     end
 end
 
-function [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
+function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
     m = size(U, 2);
     n = size(K, 1);
 
     % constraint Kz = f + Pe sum_{ij} u_i^T B_j v_i e_j
     rhs = f;
 
-    Rz = 2 * K * z;
+    Rz = K * ( 2*z + mu );
 
     RU = zeros(n, m); RV = zeros(n, m);
 
@@ -153,6 +150,9 @@ function [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, la
         end
     end
     Rmu = K*z - f - Pe * source;
+
+    % vector of residuals (MATLAB is column-major)
+    R = -[Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
 end
 
 
@@ -173,13 +173,15 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
 
     ALPHA = ( -Pe * mu(1) ) * B{1};
     for j = 2:n
+        % check transposes here!!!!
         ALPHA = ALPHA - ( Pe * mu(j) ) * B{j};
     end
 
      % U-U blocks (2 lamnbda K) and V-V blocks (2K)
+     shift = n;
      for i = 1:r
-         Ui_idx = n + (i-1) * n + (1:n);
-         Vi_idx = n + r*n + (i-1)*n + (1:n);
+         Ui_idx =  shift + (1:n);
+         Vi_idx =  shift + n + (1:n);
 
          A(Ui_idx, Ui_idx) = (2 * lambda) * K;
          A(Vi_idx, Vi_idx) = 2 * K;
@@ -192,6 +194,9 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
            
          A(Ui_idx, Vi_idx) = ALPHA ; % \alpha
          A(Vi_idx, Ui_idx) = ALPHA'; % \alpha^T
+
+         % Update shift
+         shift = shift + 2*n;
      end
     
     % -------- block Bmat --------
@@ -203,20 +208,19 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
     % Bmat(1:n, 1:n) = 0;
     Bmat(1:n, 2:end) = K;
 
-    % first column: derivatative wrt lambda (2 K u_i \\ 0) ...
+    % Loop over ""rank blocks"
+    shift = n;
     for i = 1:r
-        Ui_idx = n + (i-1) * n + (1:n);
+        % row indices for Ui and Vi
+        Ui_idx =  shift + (1:n);
+        Vi_idx =  shift + n + (1:n);
+
+        % first column: derivatative wrt lambda (2 K u_i \\ 0) ...
         Bmat(Ui_idx, 1) = 2 * K * U(:,i);
-    end
 
-    % second column: gammas and betas
-    for i = 1:r
-        Ui_idx = n + (i-1) * n + (1:n);
-        Vi_idx = n + r*n + (i-1)*n + (1:n);
-
+        % compute gammas and betas
         gamma_i_tr = zeros(n,n);
         beta_i_tr  = zeros(n,n);
-        
         for j = 1:length(B)
             % \beta_i = - Pe [\sum_j v_i^T B_j^T \cdot e_j ]^T
             % gradU = gradU - Pe * B{j} * V(:,i);
@@ -227,15 +231,14 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
             gamma_i_tr(:,j) = - Pe * B{j}' * U(:,i);
         end
 
-        % Bmat(Ui_idx, 2:end) = beta_i_tr;
-        % Bmat(Vi_idx, 2:end) = gamma_i_tr;
-        %% this overwrites values, as beta_i_tr is n × n, and the block
-        %% is of shape n x n, repeated per i
-        %% instead, accumulate the contributions accross i:
-        Bmat(Ui_idx, 2:end) = Bmat(Ui_idx, 2:end) + beta_i_tr;
-        Bmat(Vi_idx, 2:end) = Bmat(Vi_idx, 2:end) + gamma_i_tr;
+        % assign gammas and betas
+        Bmat(Ui_idx, 2:end) = beta_i_tr;
+        Bmat(Vi_idx, 2:end) = gamma_i_tr;
 
+        % Udate shift
+        shift = shift + 2*n;
     end
+
 end
 
 function [s1, s2] = solve_newton_system_basic(A, Bmat, rhs)

@@ -8,9 +8,9 @@ close all
 % --- Parameters ---
 N = 20;                 % Mesh resolution
 tol = 1e-13;            % Cleaning threshold
-Pe = 0;                 % Péclet number (convection strength)
-rank_m = 2;             % Low-rank parameter (number of u_i v_i^T terms)
-max_iter = 500;          % Max Newton iterations
+Pe = 1;                 % Péclet number (convection strength)
+rank_m = 3;             % Low-rank parameter (number of u_i v_i^T terms)
+max_iter = 200;          % Max Newton iterations
 tol_newton = 1e-8;      % Newton convergence tolerance
 
 % --- Heating distribution function (uniform) ---
