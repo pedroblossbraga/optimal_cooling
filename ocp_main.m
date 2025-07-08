@@ -8,7 +8,7 @@ close all
 % Parameters
 N = 20;
 tol = 1e-13;
-Pe = 1;
+Pe = 0;
 
 % The heating distribution function (here, equal to 1 everywhere)
 f_handle = @(x,y) ones(size(x));
@@ -27,11 +27,13 @@ f = sdp_getF(nodes, elements, dirichlet, area, f_handle);
 [M, K, B] = sdp_getMatrices(nodes,elements,dirichlet);
 [M, K, B] = sdp_clean(M, K, B, tol);
 
+tic
 % Solve SDP if small enough
 % This assumes the MATLAB path has working installations of
 % * YALMIP
 % * MOSEK
 if N <= 25
+% if N <= 250
     try % Maybe the user does not have the right packages installed...
 
         % Assemble the SDP in SeDuMi format (easy)
@@ -66,3 +68,4 @@ if N <= 25
         warning('Could not solve SDP. Please install YALMIP and MOSEK!')
     end
 end
+toc

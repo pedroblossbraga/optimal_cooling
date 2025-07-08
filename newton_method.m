@@ -1,21 +1,31 @@
 function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
+    tic
     % implementation of low-rank newton method for optimal cooling 
     % r (low rank!!)
     
     % --- Initialization ---
     U = eye(M_nodes, r);
     V = eye(M_nodes, r);
+    % U = ones(M_nodes, r);
+    % V = ones(M_nodes, r);
+    % U = randn(M_nodes, r);
+    % V = randn(M_nodes, r);
+
     z = zeros(M_nodes, 1);
     n = size(K,1);
 
     % initial lagrange multipliers
     lambda = 1; 
     mu = zeros(n,1);
+    % mu = ones(n,1);
+
+    % residual_history = zeros(max_iter, 1);
 
     for k = 1:max_iter
 
         % compute residuals
         R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
+        R = -R;
         
         % check convergence
         norm_R = norm(R);
@@ -24,6 +34,8 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
             fprintf('Newton converged at iter %d with ||R|| = %.2e\n', k, norm_R);
             break;
         end
+        % residual_history(k) = norm_R;
+
         
         constraint = sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r));
         fprintf("||U^T K U|| sum: %.4f\n", constraint);
@@ -52,9 +64,16 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         % extract all updates
         delta_z = s1(1:n);
         idx = n + (1 : 2*n*r);
-        delta_UV = reshape( s1(idx), 2*n, r );
+
+        delta_UV = reshape( s1(idx), 2*n, r);
         delta_U = delta_UV(1:n,:);
-        delta_V = delta_UV(n+1:2*n,:);
+        delta_V = delta_UV(n+1:2*n,:); 
+        % % 
+        % % Stack was [z; U(:); V(:)]
+        % delta_U = reshape(s1(n+1 : n+n*r), n, r);
+        % delta_V = reshape(s1(n+n*r+1 : n+2*n*r), n, r);
+
+
         delta_lambda = s2(1);
         delta_mu = s2(2:end);
         
@@ -71,7 +90,7 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         %---------  Step size search --------------------------------------
         % alpha = 0.01;     % Initial step
         alpha=1;            % Initial step
-        STEP_TOL = 1e-4;    % sigma
+        STEP_TOL = 1e-6;    % sigma
         BETA = 0.5;         % shrink factor
         max_ls_iter = 200;
         
@@ -103,6 +122,8 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
         %------------------------------------------------------------------
 
     end
+    toc
+    % plot_residual_history(residual_history, k)
 end
 
 function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
@@ -152,7 +173,7 @@ function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
     Rmu = K*z - f - Pe * source;
 
     % vector of residuals (MATLAB is column-major)
-    R = -[Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
+    R = [Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
 end
 
 
@@ -205,7 +226,6 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
     Bmat = sparse(Nvar, N_LagrangMult);
 
     % Bmat(1:n, 2) = K * ones(n,1); % or set Bmat(1:n,2) = K*z later if needed
-    % Bmat(1:n, 1:n) = 0;
     Bmat(1:n, 2:end) = K;
 
     % Loop over ""rank blocks"
@@ -235,6 +255,9 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
         Bmat(Ui_idx, 2:end) = beta_i_tr;
         Bmat(Vi_idx, 2:end) = gamma_i_tr;
 
+        % sanity check
+        assert(all(size(Bmat(Ui_idx, 2:end)) == size(beta_i_tr)));
+
         % Udate shift
         shift = shift + 2*n;
     end
@@ -244,17 +267,20 @@ end
 function [s1, s2] = solve_newton_system_basic(A, Bmat, rhs)
     nmult = size(Bmat,2);
     M = [A, Bmat; Bmat', sparse(nmult,nmult)];
+
+    % M_dense = full(M);
+    % csvwrite('M_matrix.csv', M_dense);
+
     s = M \ rhs;
     s1 = s(1:end-nmult);
     s2 = s(end-nmult+1:end);
 end
 
-
 function [s1, s2] = solve_newton_system(A, Bmat, rhs)
     % solve system:
     % | A   B | = |r1|
     % | B^T 0 |   |r2|
-    
+
     n1 = size(A,1);  % = n + 2nr
     %n2 = size(Bmat,2);
 
@@ -266,7 +292,7 @@ function [s1, s2] = solve_newton_system(A, Bmat, rhs)
     R1 = rhs(1:n1);
     R2 = rhs(n1+1:end);
 
-    
+
     % (LDL decomposition) A = L D L^T  # potentially change to cholesky L = chol(A, 'lower');
     [L, D, p] = ldl(A, "vector"); % sparsity-preserving LDL^T
 
@@ -284,9 +310,59 @@ function [s1, s2] = solve_newton_system(A, Bmat, rhs)
 
     BAinvR1 = Bmat' * (A \ R1);  % (2x1)
     resid2 = BAinvR1 - R2;       % now same size
-    
+
     s2 = t1 \ resid2;
 
     % solve for s1
     s1 = inv(A) * (R1 -(Bmat * s2));
+end
+
+% function [s1, s2] = solve_newton_system(A, B, rhs)
+%     n1 = size(A, 1);
+%     R1 = rhs(1:n1);
+%     R2 = rhs(n1+1:end);
+% 
+%     % LDLᵗ factorization
+%     [L, D, p] = ldl(A, 'vector');  % Permutation for numerical stability
+% 
+%     % Solve A^{-1} B
+%     Y = L \ B(p,:);     % L * Y = P * B  ⇒ Y = L⁻¹ * (P*B)
+%     Z = D \ Y;          % D * Z = Y ⇒ Z = D⁻¹ Y
+%     X = L' \ Z;         % Lᵗ * X = Z ⇒ X = Lᵗ⁻¹ Z = A⁻¹ B
+% 
+%     S = B' * X;         % Schur complement: Bᵗ A⁻¹ B
+% 
+%     % Solve A^{-1} R1
+%     b = L \ R1(p);
+%     b = D \ b;
+%     b = L' \ b;
+% 
+%     rhs_s2 = B' * b - R2;
+%     s2 = S \ rhs_s2;
+% 
+%     % Recover s1
+%     s1 = b - X * s2;
+% 
+%     % Undo permutation
+%     s1(p) = s1;
+% end
+function plot_residual_history(residual_history, k)
+    % Trim unused entries
+    residual_history = residual_history(1:k);
+    
+    % Plot
+    figure;
+    semilogy(1:k, residual_history, 'b-o', 'LineWidth', 1.5);
+    xlabel('Iteration');
+    ylabel('||R|| (Residual Norm)');
+    title('Newton Residual Convergence');
+    grid on;
+    
+    % Save plot
+    if ~exist('data', 'dir'); mkdir('data'); end
+    saveas(gcf, 'data/newton_residual_convergence.png');
+    
+    % Optionally also save raw data
+    writematrix(residual_history, 'data/residual_history.csv');
+
 end
