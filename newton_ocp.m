@@ -6,7 +6,7 @@ clear
 close all
 
 % --- Parameters ---
-N = 20;                 % Mesh resolution
+N = 100;                 % Mesh resolution
 tol = 1e-13;            % Cleaning threshold
 Pe = 1;                 % Péclet number (convection strength)
 rank_m = 2;             % Low-rank parameter (number of u_i v_i^T terms)
@@ -31,7 +31,7 @@ f = sdp_getF(nodes, elements, dirichlet, area, f_handle);
 
 % --- Solve with Newton's method (low-rank formulation) ---
 M_nodes = size(K,1);
-[U, V, z] = newton_method(K, B, f, Pe, M_nodes, rank_m, tol_newton, max_iter);
+[U, V, z] = newton_method(K, B, f, Pe, M_nodes, rank_m, tol_newton, max_iter, N);
 
 % --- Recover full temperature vector including Dirichlet nodes ---
 z_full = zeros(size(nodes,1), 1);   % total number of mesh nodes

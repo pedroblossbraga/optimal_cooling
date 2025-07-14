@@ -1,4 +1,4 @@
-function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
+function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
     tic
     % implementation of low-rank newton method for optimal cooling 
     % r (low rank!!)
@@ -150,7 +150,7 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
     end
     toc
     % plot_residual_history(residual_history, k);
-    plot_residual_history(residual_history, residual_method, k, norm_R);
+    plot_residual_history(residual_history, residual_method, k, norm_R, cost, Pe, r, N);
 
 end
 
@@ -383,7 +383,7 @@ end
 %     writematrix(residual_history, 'data/residual_history.csv');
 % 
 % end
-function plot_residual_history(residual_history, residual_method, k, last_R)
+function plot_residual_history(residual_history, residual_method, k, last_R, cost, Pe, rank_m, N)
     % Trim unused entries
     residual_history = residual_history(1:k);
     residual_method = residual_method(1:k);
@@ -418,9 +418,14 @@ function plot_residual_history(residual_history, residual_method, k, last_R)
     
     xlabel('Iteration', 'FontSize', 17);
     ylabel('||R|| (Residual Norm)', 'FontSize', 17);
-    title(sprintf('Residual Convergence (||R||=%.2e, n.iter=%d)', ...
-        last_R, k), ...
-        'FontSize', 20);
+    % title(sprintf('Residual Convergence (||R||=%.2e, n.iter=%d, cost=%.2e, Pe=%d, rank=%d)', ...
+    %     last_R, k, cost, Pe, rank_m), ...
+    %     'FontSize', 20);
+    title({ ...
+        sprintf('Residual history (||R||=%.2e, n.iter=%d)', last_R, k), ...
+        sprintf('Cost=%.4e, Pe=%d, rank=%d, N_{mesh}=%d', cost, Pe, rank_m, N) ...
+    }, 'FontSize', 20);
+
 
     legend('FontSize', 20, 'Location', 'northeast');
     grid on;
