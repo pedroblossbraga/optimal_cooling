@@ -7,7 +7,7 @@ close all
 
 % --- Parameters ---
 N = 100;                 % Mesh resolution
-tol = 1e-13;            % Cleaning threshold
+tol = 1e-16;            % Cleaning threshold
 Pe = 1;                 % Péclet number (convection strength)
 rank_m = 2;             % Low-rank parameter (number of u_i v_i^T terms)
 max_iter = 2000;          % Max Newton iterations

@@ -6,10 +6,12 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
     % --- Initialization ---
     % Problem size
     n = size(K,1);
+
     % Initialize U and V as eigenfunctions of K
     [U,~] = eigs(K, r, 'smallestabs');
     V = U;
     U = U ./ sqrt( sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r)) );
+
     % Initialize z as feasible
     source = zeros(n,1);
     for j = 1:n
@@ -18,6 +20,7 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
         end
     end
     z = K \ (f + Pe*source);
+    
     % initial lagrange multipliers
     lambda = 1;
     mu = -2*z;
@@ -27,30 +30,13 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
     lr_asc=0.01;
     TOL_GRAD_METHOD=1e0;
 
-    % % --- Initialization ---
-    % U = eye(M_nodes, r);
-    % V = eye(M_nodes, r);
-    % % U = ones(M_nodes, r);
-    % % V = ones(M_nodes, r);
-    % % U = randn(M_nodes, r);
-    % % V = randn(M_nodes, r);
-    % 
-    % z = zeros(M_nodes, 1);
-    % n = size(K,1);
-    % 
-    % % initial lagrange multipliers
-    % lambda = 1; 
-    % mu = zeros(n,1);
-    % % mu = ones(n,1);
-
+    % save results for plotting later
     residual_history = zeros(max_iter, 1);
     residual_method = strings(max_iter, 1);  % track method: "Newton" or "Grad"
 
     for k = 1:max_iter
 
         % compute residuals
-        % R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
-        % R = -R;
         [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
         
         % vector of residuals (MATLAB is column-major)
@@ -80,14 +66,34 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
             residual_method(k) = "Grad";
             fprintf("-- (grad method) norm(R): %s\n", norm_R);
 
+            % normalizing U for better conditioning
+            normU = sqrt(sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r)));
+            U = U / normU;
+            
+            % scale learning rates per variable
+            lr_z = lr_desc / norm(Rz);
+            lr_U = lr_desc / norm(RU, 'fro');
+            lr_V = lr_desc / norm(RV, 'fro');
+            lr_lambda = lr_asc / abs(Rlambda);
+            lr_mu = lr_asc / norm(Rmu);
+
             % gradient descent for primal variables
-            z = z - lr_desc * Rz;
-            U = U - lr_desc * RU;
-            V = V - lr_desc * RV;
+            z = z - lr_z * Rz;
+            U = U - lr_U * RU;
+            V = V - lr_V * RV;
             
             % gradient ascent for Lagrange Multipliers
-            lambda = lambda + lr_asc * Rlambda;
-            mu = mu + lr_asc * Rmu;
+            lambda = lambda + lr_lambda * Rlambda;
+            mu = mu + lr_mu * Rmu;
+
+            % % gradient descent for primal variables
+            % z = z - lr_desc * Rz;
+            % U = U - lr_desc * RU;
+            % V = V - lr_desc * RV;
+            % 
+            % % gradient ascent for Lagrange Multipliers
+            % lambda = lambda + lr_asc * Rlambda;
+            % mu = mu + lr_asc * Rmu;
 
         else %% newton method
             residual_method(k) = "Newton";
@@ -113,13 +119,13 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
             delta_mu = s2(2:end);
             
             %------------------------------------------------------------------
-            %---------  Step size search --------------------------------------
+            % %---------  Step size search --------------------------------------
             % alpha = 0.01;     % Initial step
             alpha=1;            % Initial step
             STEP_TOL = 1e-6;    % sigma
             BETA = 0.5;         % shrink factor
             max_ls_iter = 5;
-            
+
             for ls_iter = 1:max_ls_iter
                 % Trial update
                 z_trial = z + alpha * delta_z;
@@ -127,17 +133,21 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter, N)
                 V_trial = V + alpha * delta_V;
                 lambda_trial = lambda + alpha * delta_lambda;
                 mu_trial = mu + alpha * delta_mu;
-            
+
                 % Compute residual at trial point
                 R_new = compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
-            
+
                 % Check Armijo condition
                 if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
                     break;  % sufficient decrease
                 end
-            
+
                 alpha = BETA * alpha;  % reduce step
             end
+
+
+            % alpha = armijo_line_search(alpha, BETA, STEP_TOL, max_ls_iter, ...
+            %     z, U, V, lambda, mu)
             
             % Accept update
             z = z + alpha * delta_z;
@@ -440,3 +450,72 @@ function plot_residual_history(residual_history, residual_method, k, last_R, cos
     %           'VariableNames', {'Iteration', 'Residual', 'Method'});
     % writetable(T, 'data/residual_history.csv');
 end
+
+function alpha = armijo_line_search(alpha, beta, step_tol, max_ls_iter, ...
+                z, u, V, lambda, mu)
+%---------  Step size search --------------------------------------
+    % % alpha = 0.01;     % Initial step
+    % alpha=1;            % Initial step
+    % STEP_TOL = 1e-6;    % sigma
+    % BETA = 0.5;         % shrink factor
+    % max_ls_iter = 5;
+    
+    for ls_iter = 1:max_ls_iter
+        % Trial update
+        z_trial = z + alpha * delta_z;
+        U_trial = U + alpha * delta_U;
+        V_trial = V + alpha * delta_V;
+        lambda_trial = lambda + alpha * delta_lambda;
+        mu_trial = mu + alpha * delta_mu;
+    
+        % Compute residual at trial point
+        R_new = compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
+    
+        % Check Armijo condition: use descent (default) or ascent criterion
+        if ~is_ascent
+            condition = norm(R_new) < (1 - step_tol * alpha) * norm_R;
+        else
+            condition = norm(R_new) > (1 + STEP_TOL * alpha) * norm_R;
+        end
+        if condition
+            break;
+        end
+    
+        alpha = beta * alpha;  % update step
+    end
+    
+    % Accept update
+    z = z + alpha * delta_z;
+    U = U + alpha * delta_U;
+    V = V + alpha * delta_V;
+    lambda = lambda + alpha * delta_lambda;
+    mu = mu + alpha * delta_mu;
+end
+function alpha = line_search_armijo(update_fn, compute_residual, ...
+                                     vars, direction, ...
+                                     norm_R, is_ascent)
+
+    alpha = 1.0;
+    STEP_TOL = 1e-6;
+    BETA = 0.5;
+    max_iter = 10;
+
+    for k = 1:max_iter
+        vars_trial = update_fn(vars, direction, alpha);
+        R_new = compute_residual(vars_trial);
+
+        % Use descent (default) or ascent criterion
+        if ~is_ascent
+            condition = norm(R_new) < (1 - STEP_TOL * alpha) * norm_R;
+        else
+            condition = norm(R_new) > (1 + STEP_TOL * alpha) * norm_R;
+        end
+
+        if condition
+            break;
+        end
+
+        alpha = BETA * alpha;
+    end
+end
+
