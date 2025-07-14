@@ -10,7 +10,7 @@ N = 20;                 % Mesh resolution
 tol = 1e-13;            % Cleaning threshold
 Pe = 1;                 % Péclet number (convection strength)
 rank_m = 2;             % Low-rank parameter (number of u_i v_i^T terms)
-max_iter = 200;          % Max Newton iterations
+max_iter = 2000;          % Max Newton iterations
 % tol_newton = 1e-8;      % Newton convergence tolerance
 tol_newton = 1e-10;      % Newton convergence tolerance
 
@@ -41,11 +41,39 @@ z_full(ID ~= 0) = z;  % insert interior solution into full vector
 % --- Plot solution: temperature field z ---
 figure()
 trisurf(elements(:,1:3), nodes(:,1), nodes(:,2), z_full, 'FaceColor', 'interp');
-title('optimal z - Newton solution');
+title('optimal z - Newton solution', ...
+        'FontSize', 20);
 axis equal
 view([0 90]);
 shading interp
 colorbar
+
+cb = colorbar;
+cb.Color = 'k';           % Set colorbar text (numbers) to black
+cb.Label.Color = 'k';     % Set label color (if used)
+cb.FontSize = 14;         % Optional: match font size
+cb.FontWeight = 'normal'; % Optional: style
+
+ax = gca;
+    set(ax, ...
+        'Color', 'w', ...               % Axes background
+        'XColor', 'k', 'YColor', 'k', ... % Axis label colors
+        'GridColor', 'k', ...
+        'MinorGridColor', 'k', ...
+        'FontSize', 14, ...
+        'FontWeight', 'normal');
+    
+    % Force black labels and title
+    xlabel(ax.XLabel.String, 'Color', 'k', 'FontSize', 14);
+    ylabel(ax.YLabel.String, 'Color', 'k', 'FontSize', 14);
+    title(ax.Title.String, 'Color', 'k', 'FontSize', 16);
+    
+    % Also set figure background to white
+    set(gcf, 'Color', 'w');
+   
+% Save plot
+    if ~exist('data', 'dir'); mkdir('data'); end
+    saveas(gcf, 'data/newton_optimal_z.png');
 
 % --- Compute effective heat source Σ |u_i^T B_j v_i| ---
 m = size(U, 2);  % rank
@@ -65,8 +93,36 @@ xi(ID ~= 0) = heat_source;
 % --- Plot effective heat source field ---
 figure()
 trisurf(elements(:,1:3), nodes(:,1), nodes(:,2), xi, 'FaceColor', 'interp');
-title('|Σ u_i^T B_j v_i| (Effective Heat Source)');
+title('|Σ u_i^T B_j v_i| (Effective Heat Source)', ...
+        'FontSize', 20);
 axis equal
 view([0 90]);
 shading interp
 colorbar
+
+cb = colorbar;
+cb.Color = 'k';           % Set colorbar text (numbers) to black
+cb.Label.Color = 'k';     % Set label color (if used)
+cb.FontSize = 14;         % Optional: match font size
+cb.FontWeight = 'normal'; % Optional: style
+
+ax = gca;
+    set(ax, ...
+        'Color', 'w', ...               % Axes background
+        'XColor', 'k', 'YColor', 'k', ... % Axis label colors
+        'GridColor', 'k', ...
+        'MinorGridColor', 'k', ...
+        'FontSize', 14, ...
+        'FontWeight', 'normal');
+    
+    % Force black labels and title
+    xlabel(ax.XLabel.String, 'Color', 'k', 'FontSize', 14);
+    ylabel(ax.YLabel.String, 'Color', 'k', 'FontSize', 14);
+    title(ax.Title.String, 'Color', 'k', 'FontSize', 16);
+    
+    % Also set figure background to white
+    set(gcf, 'Color', 'w');
+
+% Save plot
+if ~exist('data', 'dir'); mkdir('data'); end
+saveas(gcf, 'data/newton_effective_heat_source.png');

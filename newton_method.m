@@ -4,29 +4,59 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
     % r (low rank!!)
     
     % --- Initialization ---
-    U = eye(M_nodes, r);
-    V = eye(M_nodes, r);
-    % U = ones(M_nodes, r);
-    % V = ones(M_nodes, r);
-    % U = randn(M_nodes, r);
-    % V = randn(M_nodes, r);
-
-    z = zeros(M_nodes, 1);
+    % Problem size
     n = size(K,1);
-
+    % Initialize U and V as eigenfunctions of K
+    [U,~] = eigs(K, r, 'smallestabs');
+    V = U;
+    U = U ./ sqrt( sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r)) );
+    % Initialize z as feasible
+    source = zeros(n,1);
+    for j = 1:n
+        for i = 1:r
+            source(j) = source(j) + U(:,i)' * B{j} * V(:,i);
+        end
+    end
+    z = K \ (f + Pe*source);
     % initial lagrange multipliers
-    lambda = 1; 
-    mu = zeros(n,1);
-    % mu = ones(n,1);
+    lambda = 1;
+    mu = -2*z;
 
-    % residual_history = zeros(max_iter, 1);
+    % grad descent/ascent parameters
+    lr_desc=0.01;
+    lr_asc=0.01;
+    TOL_GRAD_METHOD=1e0;
+
+    % % --- Initialization ---
+    % U = eye(M_nodes, r);
+    % V = eye(M_nodes, r);
+    % % U = ones(M_nodes, r);
+    % % V = ones(M_nodes, r);
+    % % U = randn(M_nodes, r);
+    % % V = randn(M_nodes, r);
+    % 
+    % z = zeros(M_nodes, 1);
+    % n = size(K,1);
+    % 
+    % % initial lagrange multipliers
+    % lambda = 1; 
+    % mu = zeros(n,1);
+    % % mu = ones(n,1);
+
+    residual_history = zeros(max_iter, 1);
+    residual_method = strings(max_iter, 1);  % track method: "Newton" or "Grad"
 
     for k = 1:max_iter
 
         % compute residuals
-        R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
-        R = -R;
+        % R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
+        % R = -R;
+        [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu);
         
+        % vector of residuals (MATLAB is column-major)
+        R = [Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
+        R = -R;
+
         % check convergence
         norm_R = norm(R);
         fprintf("---- norm(R): %s\n", norm_R);
@@ -34,99 +64,98 @@ function [U, V, z] = newton_method(K, B, f, Pe, M_nodes, r, tol, max_iter)
             fprintf('Newton converged at iter %d with ||R|| = %.2e\n', k, norm_R);
             break;
         end
-        % residual_history(k) = norm_R;
 
-        
+        % store residual from iteration k
+        residual_history(k) = norm_R;
+
+        % check constraint and cost values
         constraint = sum(arrayfun(@(i) U(:,i)' * K * U(:,i), 1:r));
         fprintf("||U^T K U|| sum: %.4f\n", constraint);
         
         cost = z' * K * z + sum(arrayfun(@(i) V(:,i)' * K * V(:,i), 1:r));
         fprintf("Iter %d, cost: %.4e\n", k, cost);
 
+        %% accept grad desc/asc until residuals are small enough, then use Newton
+        if norm_R > TOL_GRAD_METHOD %% gradient descent/ascent
+            residual_method(k) = "Grad";
+            fprintf("-- (grad method) norm(R): %s\n", norm_R);
 
-        % %% check temperature field instead of all residuals
-        % norm_Rz = norm(Rz);
-        % fprintf("---- norm(Rz): %s\n", norm_Rz);
-        % if norm_Rz < tol
-        %     fprintf('Newton converged at iter %d with ||Rz|| = %.2e\n', k, norm_Rz);
-        %     break;
-        % end
-        
-        % build jacobian matrix blocks A and Bmat (different from other B)
-        % J = | A   B |
-        %     | B^T 0 |
-        [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu);
+            % gradient descent for primal variables
+            z = z - lr_desc * Rz;
+            U = U - lr_desc * RU;
+            V = V - lr_desc * RV;
+            
+            % gradient ascent for Lagrange Multipliers
+            lambda = lambda + lr_asc * Rlambda;
+            mu = mu + lr_asc * Rmu;
 
-        % solve newton system
-        % [s1, s2] = solve_newton_system(A, Bmat, R);
-        [s1, s2] = solve_newton_system_basic(A, Bmat, R);
-        
-        % extract all updates
-        delta_z = s1(1:n);
-        idx = n + (1 : 2*n*r);
-
-        delta_UV = reshape( s1(idx), 2*n, r);
-        delta_U = delta_UV(1:n,:);
-        delta_V = delta_UV(n+1:2*n,:); 
-        % % 
-        % % Stack was [z; U(:); V(:)]
-        % delta_U = reshape(s1(n+1 : n+n*r), n, r);
-        % delta_V = reshape(s1(n+n*r+1 : n+2*n*r), n, r);
-
-
-        delta_lambda = s2(1);
-        delta_mu = s2(2:end);
-        
-        % % step size search
-        % alpha = 0.01; % initial step
-        % % alpha = 1;
-        % z_new = z + alpha * delta_z;
-        %     U_new = U + alpha * delta_U;
-        %     V_new = V + alpha * delta_V;
-        %     lambda_new = lambda + alpha * delta_lambda;
-        %     mu_new = mu + alpha * delta_mu;
-
-        %------------------------------------------------------------------
-        %---------  Step size search --------------------------------------
-        % alpha = 0.01;     % Initial step
-        alpha=1;            % Initial step
-        STEP_TOL = 1e-6;    % sigma
-        BETA = 0.5;         % shrink factor
-        max_ls_iter = 200;
-        
-        for ls_iter = 1:max_ls_iter
-            % Trial update
-            z_trial = z + alpha * delta_z;
-            U_trial = U + alpha * delta_U;
-            V_trial = V + alpha * delta_V;
-            lambda_trial = lambda + alpha * delta_lambda;
-            mu_trial = mu + alpha * delta_mu;
-        
-            % Compute residual at trial point
-            R_new = compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
-        
-            % Check Armijo condition
-            if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
-                break;  % sufficient decrease
+        else %% newton method
+            residual_method(k) = "Newton";
+            fprintf("-- (newton method) norm(R): %s\n", norm_R);
+            
+            % build jacobian matrix blocks A and Bmat (different from other B)
+            % J = | A   B |
+            %     | B^T 0 |
+            [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu);
+            
+            % solve newton system
+            % [s1, s2] = solve_newton_system(A, Bmat, R);
+            [s1, s2] = solve_newton_system_basic(A, Bmat, R);
+            
+            % extract all updates
+            delta_z = s1(1:n);
+            idx = n + (1 : 2*n*r);
+    
+            delta_UV = reshape( s1(idx), 2*n, r);
+            delta_U = delta_UV(1:n,:);
+            delta_V = delta_UV(n+1:2*n,:); 
+            delta_lambda = s2(1);
+            delta_mu = s2(2:end);
+            
+            %------------------------------------------------------------------
+            %---------  Step size search --------------------------------------
+            % alpha = 0.01;     % Initial step
+            alpha=1;            % Initial step
+            STEP_TOL = 1e-6;    % sigma
+            BETA = 0.5;         % shrink factor
+            max_ls_iter = 5;
+            
+            for ls_iter = 1:max_ls_iter
+                % Trial update
+                z_trial = z + alpha * delta_z;
+                U_trial = U + alpha * delta_U;
+                V_trial = V + alpha * delta_V;
+                lambda_trial = lambda + alpha * delta_lambda;
+                mu_trial = mu + alpha * delta_mu;
+            
+                % Compute residual at trial point
+                R_new = compute_residuals(K, B, f, Pe, U_trial, V_trial, z_trial, lambda_trial, mu_trial);
+            
+                % Check Armijo condition
+                if norm(R_new) < (1 - STEP_TOL * alpha) * norm_R
+                    break;  % sufficient decrease
+                end
+            
+                alpha = BETA * alpha;  % reduce step
             end
-        
-            alpha = BETA * alpha;  % reduce step
+            
+            % Accept update
+            z = z + alpha * delta_z;
+            U = U + alpha * delta_U;
+            V = V + alpha * delta_V;
+            lambda = lambda + alpha * delta_lambda;
+            mu = mu + alpha * delta_mu;
+            %------------------------------------------------------------------
         end
-        
-        % Accept update
-        z = z + alpha * delta_z;
-        U = U + alpha * delta_U;
-        V = V + alpha * delta_V;
-        lambda = lambda + alpha * delta_lambda;
-        mu = mu + alpha * delta_mu;
-        %------------------------------------------------------------------
-
     end
     toc
-    % plot_residual_history(residual_history, k)
+    % plot_residual_history(residual_history, k);
+    plot_residual_history(residual_history, residual_method, k, norm_R);
+
 end
 
-function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
+% function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
+function [Rz, RU, RV, Rlambda, Rmu] = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
     m = size(U, 2);
     n = size(K, 1);
 
@@ -155,15 +184,7 @@ function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
     for i = 1:m
         Rlambda = Rlambda + U(:,i)' * K * U(:,i);
     end
-    
-    % Rmu = K*z - f;
-    % for i = 1:m
-    %     for j = 1:n
-    %         BJ = B{j};
-    %         Rmu = Rmu - Pe * U(:,i)' * BJ * V(:,i);
-    %     end
-    % end
-    %$ subtracting scalar f from vector Rmu
+
     source = zeros(n,1);
     for j = 1:n
         for i = 1:m
@@ -172,8 +193,8 @@ function R = compute_residuals(K, B, f, Pe, U, V, z, lambda, mu)
     end
     Rmu = K*z - f - Pe * source;
 
-    % vector of residuals (MATLAB is column-major)
-    R = [Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
+    % % vector of residuals (MATLAB is column-major)
+    % R = [Rz; reshape([RU; RV],[],1); Rlambda; Rmu];
 end
 
 
@@ -208,11 +229,6 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
          A(Vi_idx, Vi_idx) = 2 * K;
         
          % % U-V cross blocks alpha = Pe \sum mu_j B_j
-         % cross = sparse(n,n);
-         % for j = 1:length(B)
-         %     cross = cross - Pe * mu * B{j};
-         % end
-           
          A(Ui_idx, Vi_idx) = ALPHA ; % \alpha
          A(Vi_idx, Ui_idx) = ALPHA'; % \alpha^T
 
@@ -243,11 +259,9 @@ function [A, Bmat] = assemble_jacobian_blocks(K, B, Pe, U, V, lambda, mu)
         beta_i_tr  = zeros(n,n);
         for j = 1:length(B)
             % \beta_i = - Pe [\sum_j v_i^T B_j^T \cdot e_j ]^T
-            % gradU = gradU - Pe * B{j} * V(:,i);
             beta_i_tr(:,j) = - Pe * B{j} * V(:,i);
 
             % \gamma_i = - Pe \sum_j v_i^T B_j^T \cdot e_j 
-            % gradV = gradV - Pe * B{j}' * U(:,i);
             gamma_i_tr(:,j) = - Pe * B{j}' * U(:,i);
         end
 
@@ -270,6 +284,9 @@ function [s1, s2] = solve_newton_system_basic(A, Bmat, rhs)
 
     % M_dense = full(M);
     % csvwrite('M_matrix.csv', M_dense);
+
+    % % % regularization term
+    % M = M + 1e-6 * speye(size(J));
 
     s = M \ rhs;
     s1 = s(1:end-nmult);
@@ -346,23 +363,75 @@ end
 %     % Undo permutation
 %     s1(p) = s1;
 % end
-function plot_residual_history(residual_history, k)
+% function plot_residual_history(residual_history, k)
+%     % Trim unused entries
+%     residual_history = residual_history(1:k);
+% 
+%     % Plot
+%     figure;
+%     semilogy(1:k, residual_history, 'b-o', 'LineWidth', 1.5);
+%     xlabel('Iteration');
+%     ylabel('||R|| (Residual Norm)');
+%     title('Newton Residual Convergence');
+%     grid on;
+% 
+%     % Save plot
+%     if ~exist('data', 'dir'); mkdir('data'); end
+%     saveas(gcf, 'data/newton_residual_convergence.png');
+% 
+%     % Optionally also save raw data
+%     writematrix(residual_history, 'data/residual_history.csv');
+% 
+% end
+function plot_residual_history(residual_history, residual_method, k, last_R)
     % Trim unused entries
     residual_history = residual_history(1:k);
-    
+    residual_method = residual_method(1:k);
+
+    % Separate indices
+    idx_newton = find(residual_method == "Newton");
+    idx_grad   = find(residual_method == "Grad");
+
     % Plot
     figure;
-    semilogy(1:k, residual_history, 'b-o', 'LineWidth', 1.5);
-    xlabel('Iteration');
-    ylabel('||R|| (Residual Norm)');
-    title('Newton Residual Convergence');
-    grid on;
+    hold on;
+
+    ax = gca;
+    set(ax, ...
+        'Color', 'w', ...               % Axes background
+        'XColor', 'k', 'YColor', 'k', ... % Axis label colors
+        'GridColor', 'k', ...
+        'MinorGridColor', 'k', ...
+        'FontSize', 14, ...
+        'FontWeight', 'normal');
     
+    % Force black labels and title
+    xlabel(ax.XLabel.String, 'Color', 'k', 'FontSize', 14);
+    ylabel(ax.YLabel.String, 'Color', 'k', 'FontSize', 14);
+    title(ax.Title.String, 'Color', 'k', 'FontSize', 16);
+    
+    % Also set figure background to white
+    set(gcf, 'Color', 'w');
+
+    semilogy(idx_grad,   residual_history(idx_grad),   'ro', 'MarkerSize', 6, 'DisplayName', 'Gradient');
+    semilogy(idx_newton, residual_history(idx_newton), 'bo', 'MarkerSize', 6, 'DisplayName', 'Newton');
+    
+    xlabel('Iteration', 'FontSize', 17);
+    ylabel('||R|| (Residual Norm)', 'FontSize', 17);
+    title(sprintf('Residual Convergence (||R||=%.2e, n.iter=%d)', ...
+        last_R, k), ...
+        'FontSize', 20);
+
+    legend('FontSize', 20, 'Location', 'northeast');
+    grid on;
+    hold off;
+
     % Save plot
     if ~exist('data', 'dir'); mkdir('data'); end
     saveas(gcf, 'data/newton_residual_convergence.png');
-    
-    % Optionally also save raw data
-    writematrix(residual_history, 'data/residual_history.csv');
 
+    % % Optionally also save raw data
+    % T = table((1:k)', residual_history, residual_method, ...
+    %           'VariableNames', {'Iteration', 'Residual', 'Method'});
+    % writetable(T, 'data/residual_history.csv');
 end

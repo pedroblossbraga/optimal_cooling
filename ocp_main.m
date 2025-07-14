@@ -8,7 +8,7 @@ close all
 % Parameters
 N = 20;
 tol = 1e-13;
-Pe = 0;
+Pe = 1;
 
 % The heating distribution function (here, equal to 1 everywhere)
 f_handle = @(x,y) ones(size(x));
