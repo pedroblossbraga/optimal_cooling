@@ -6,13 +6,18 @@ clear
 close all
 
 % --- Parameters ---
-N = 100;                 % Mesh resolution
+N = 20;                 % Mesh resolution
 tol = 1e-16;            % Cleaning threshold
 Pe = 1;                 % Péclet number (convection strength)
 rank_m = 2;             % Low-rank parameter (number of u_i v_i^T terms)
 max_iter = 2000;          % Max Newton iterations
-% tol_newton = 1e-8;      % Newton convergence tolerance
 tol_newton = 1e-10;      % Newton convergence tolerance
+
+%% --- results output directory
+experiment_name="Unormalized";
+OUTPUT_DIR=sprintf('data/N%d_Pe%d_%s', N, Pe, experiment_name);
+if ~exist(OUTPUT_DIR, 'dir'); mkdir(OUTPUT_DIR); end
+
 
 % % For a Peclet > 0, we expect a cost of 3.474468954e-02
 % % currently it converges to: cost: 3.4860e-02
@@ -31,7 +36,8 @@ f = sdp_getF(nodes, elements, dirichlet, area, f_handle);
 
 % --- Solve with Newton's method (low-rank formulation) ---
 M_nodes = size(K,1);
-[U, V, z] = newton_method(K, B, f, Pe, M_nodes, rank_m, tol_newton, max_iter, N);
+[U, V, z] = newton_method(K, B, f, Pe, M_nodes, rank_m, tol_newton,...
+    max_iter, N, OUTPUT_DIR);
 
 % --- Recover full temperature vector including Dirichlet nodes ---
 z_full = zeros(size(nodes,1), 1);   % total number of mesh nodes
@@ -72,8 +78,8 @@ ax = gca;
     set(gcf, 'Color', 'w');
    
 % Save plot
-    if ~exist('data', 'dir'); mkdir('data'); end
-    saveas(gcf, 'data/newton_optimal_z.png');
+    saveas(gcf, sprintf('%s/newton_optimal_z.png', OUTPUT_DIR));
+
 
 % --- Compute effective heat source Σ |u_i^T B_j v_i| ---
 m = size(U, 2);  % rank
@@ -124,5 +130,4 @@ ax = gca;
     set(gcf, 'Color', 'w');
 
 % Save plot
-if ~exist('data', 'dir'); mkdir('data'); end
-saveas(gcf, 'data/newton_effective_heat_source.png');
+saveas(gcf, sprintf('%s/newton_effective_heat_source.png', OUTPUT_DIR));
