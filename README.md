@@ -7,11 +7,11 @@ To run, open matlab, and execute:
 
 - Newton method + Gradient descent (primal) / ascent (dual): 
     
-    newton_ocp.m
+        newton_ocp.m
 
 - Baseline: interior point method
 
-    ocp_main.m
+        ocp_main.m
 
 ## Requirements
 
