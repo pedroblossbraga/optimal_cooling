@@ -14,7 +14,7 @@ max_iter = 2000;          % Max Newton iterations
 tol_newton = 1e-10;      % Newton convergence tolerance
 
 %% --- results output directory
-experiment_name="Unormalized";
+experiment_name="standard";
 OUTPUT_DIR=sprintf('data/N%d_Pe%d_%s', N, Pe, experiment_name);
 if ~exist(OUTPUT_DIR, 'dir'); mkdir(OUTPUT_DIR); end
 
